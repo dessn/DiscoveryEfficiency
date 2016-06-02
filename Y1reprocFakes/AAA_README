@@ -1,0 +1,15 @@
+Relevant variables
+
+TRUEMAG:       true generated mag
+TRUEFORCEFLUX: true generated flux (ZP=31.4)
+
+REJECT:        : 0 --> detected and passes cuts; >0--> detected, fails cuts
+AUTOSCAN_SCORE : >0.5 --> DiffImg detection
+
+FORCEFLUX:    PSF-fitted flux on subtracted image
+FORCEFLUXERR: Error on above
+
+MAG_GALSB:    local surface bright, mag/asec^2
+ANGSEP:       angular sep between fake and host center, arcsec.
+
+
