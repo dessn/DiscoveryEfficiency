@@ -18,47 +18,93 @@ def modelplots():
 def fit():
     import pystan
 
+    # import sys
+    # import emcee
+
+
+    # nwalkers=10
+    # npar=7
+
     input = open('data.pkl', 'rb')
     [ston, fracincrease, found]=pickle.load(input)
     input.close()
 
     # prune sample
-    use = numpy.logical_and(fracincrease > 0.01, fracincrease <20)
+    use = numpy.logical_and(fracincrease > 0.01, fracincrease <10)
     ston = ston[use]
     fracincrease = fracincrease[use]
     found = found[use]
 
-    lnFI = numpy.log(fracincrease)
+    # lnFI = numpy.log(fracincrease)
+    # lnFImin = lnFI.min()
+    # lnFImax = lnFI.max()
+    # lnFI = (lnFI-lnFImin)/(lnFImax-lnFImin)
 
-    def lnprob(p):
-        eff = (ston-(p[2] + (p[3]-p[2])* lnFI)) ./ (p[4] + (p[5]-p[4])* lnFI)
-        eff = numpy.tanh(eff)
-        eff = (p[0] + (p[1]-p[0])* lnFI) *eff
-        eff[eff<=0] = 1e-12
-        return 1
+    # foundpm = (-1)**found
 
-    pinit = numpy.array([0.8,1,3,3,0.5,0.5])
-    print lnprob(pinit)
+    # def lnprob(p, lnFI, found, foundpm):
+    #     p0 = p[0]/10.
+    #     p1= p[1]/100.
+    #     if (p0<0 or  p0>1 or  p1>1 or p1<0  or p[4]<=0 or p[5]<=0 or p[6]<1 or p[2]<=0 or p[3]<=0 or p[2]>6 or p[3]>6):
+    #         return -numpy.inf
+    #     eff = (ston-(p[2] + (p[3]-p[2])* lnFI) / (p[4] + (p[5]-p[4])* lnFI))
+    #     eff = numpy.tanh(eff)
+    #     eff = (p0 + (p1-p0)* lnFI) *eff
+    #     eff[eff<=0] = 0.
+    #     eff=eff**p[6]
+    #     ans= (1-found) -foundpm*eff
+    #     ans[ans <=0] = sys.float_info.min
+    #     return numpy.log(ans).sum()
 
-    # data = {'D': len(ston), 'ston': ston, 'fracincrease': fracincrease, 'found': found.astype('int')}
-    # sm = pystan.StanModel(file='effmodel.stan')
-    # indict = {'a': [0.8,0.99], 'b': [3, 3], 'c': [0.5, 0.5]}
-    # fit = sm.sampling(data=data, iter=1000, chains=4, init=[indict, indict, indict, indict])
-    # output = open('stan.pkl','wb')
-    # pickle.dump(fit.extract(), output)
+    # p0 = []
+    # avg = numpy.array([5,99,2.5,2.5,2,2,4])
+    # for i in range(nwalkers):
+    #     p0.append(avg+numpy.random.uniform(-1,1,size=npar)*numpy.array([0.5,0.2,1,1,1,1,1]))
+
+    # sampler = emcee.EnsembleSampler(nwalkers, npar, lnprob, args=(lnFI, found, foundpm), a=0.5)
+    # sampler.run_mcmc(p0, 1000)
+
+    # output = open('emcee.pkl','wb')
+    # chain = numpy.array(sampler.chain)
+    # chain[:,:,0]=chain[:,:,0]/10.
+    # chain[:,:,1]=chain[:,:,1]/100.
+
+    # pickle.dump([chain,lnFImin,lnFImax], output)
     # output.close()
 
-fit()
-qwdw
+    data = {'D': len(ston), 'ston': ston, 'fracincrease': fracincrease, 'found': found.astype('int')}
+    sm = pystan.StanModel(file='effmodel.stan')
+    # indict = {'a': [0.996,.999999], 'b': [.1, 4], 'c': [2, 1.],'pop':5.}
+    indict = {'a1': 0.5659394 , 'a2': 3, 'b': [3., 3.3], 'c': [1, 5.],'pop':2.}
+    fit = sm.sampling(data=data, iter=400, chains=4, init=[indict, indict, indict, indict])
+    output = open('stan.pkl','wb')
+    pickle.dump(fit.extract(), output)
+    output.close()
+
+
 
 def lookatfit():
     import corner
-    f = open('effmodel.pkl','rb')
+    import pickle
+    f = open('stan.pkl','rb')
     fit = pickle.load(f)
+    pars = numpy.append(numpy.mean(fit['a1']), numpy.mean(fit['a2']))
+    pars = numpy.append(pars, numpy.mean(fit['b'],axis=0))
+    pars = numpy.append(pars,  numpy.mean(fit['c'],axis=0))
+    pars = numpy.append(pars, numpy.mean(fit['pop']))
+
+
+    plt.plot(fit[0,:,:])
+    samples = fit.reshape((-1, 7))
+    plt.plot(samples)
+    samples = fit[:, 200:, :].reshape((-1, 7))
+    print numpy.mean(samples,axis=0)
     with PdfPages('corner.pdf') as pdf:
         figure = corner.corner(fit)
         pdf.savefig()
         plt.close()
+
+
 
 
 def savedata():
@@ -140,6 +186,11 @@ def savedata():
     output.close()
 
 def plotdata(ston, fracincrease, found):
+
+    lnFI = numpy.log(fracincrease)
+    lnFImin=lnFI.min()
+    lnFImax=lnFI.max()
+
     with PdfPages('multipage_pdf.pdf') as pdf:
 
         xedges = numpy.arange(2,20.5,1)
@@ -148,14 +199,15 @@ def plotdata(ston, fracincrease, found):
         H, xedges, yedges = numpy.histogram2d(ston, fracincrease, bins=[xedges, yedges])
         xticks = (0.5*(xedges+numpy.roll(xedges,-1)))[:-1]
         yticks = (0.5*(yedges+numpy.roll(yedges,-1)))[:-1]
+        logyticks = numpy.log(yticks)
 
-        plt.hist2d(ston, numpy.log(fracincrease), bins=[xedges, numpy.log(yedges)])
-        plt.colorbar()
-        plt.title("Number of Fakes Per Bin")
-        plt.xlabel('STON')
-        plt.ylabel('log(Fraction Flux Increase)')
-        pdf.savefig()
-        plt.close()
+        # plt.hist2d(ston, numpy.log(fracincrease), bins=[xedges, numpy.log(yedges)])
+        # plt.colorbar()
+        # plt.title("Number of Fakes Per Bin")
+        # plt.xlabel('STON')
+        # plt.ylabel('log(Fraction Flux Increase)')
+        # pdf.savefig()
+        # plt.close()
 
         eff = numpy.array(H)
         effston = numpy.zeros(len(xedges)-1)
@@ -171,10 +223,43 @@ def plotdata(ston, fracincrease, found):
                     eff[i,j] = found[inxy].sum()/H[i,j]
 
 
+        f = open('stan.pkl','rb')
+        fit = pickle.load(f)
+        pars = numpy.append(numpy.mean(fit['a1']), numpy.mean(fit['a2']))
+        pars = numpy.append(pars, numpy.mean(fit['b'],axis=0))
+        pars = numpy.append(pars,  numpy.mean(fit['c'],axis=0))
+        pars = numpy.append(pars, numpy.mean(fit['pop']))
 
+        # n=3
+        # pars = numpy.append(numpy.mean(fit['a'][n+0:n+100,:],axis=0), numpy.mean(fit['b'][n+0:n+100,:],axis=0))
+        # pars = numpy.append(pars,  numpy.mean(fit['c'][n+0:n+100,:],axis=0))
+        # pars = numpy.append(pars, numpy.mean(fit['pop'][n+0:n+100]))
+
+        print pars
+        logyticks = (logyticks-lnFImin)/(lnFImax-lnFImin)
+        # pars=numpy.array([.55,5.,3.4,3.4,2,.8,2.5])
+        # pars = numpy.array([ 0.48659394 , 4.84466494 , 2.6719694 ,  2.96490356 , 1.77596779 , 0.90177606 , 4.83420871])
+        pars = numpy.array([ .3 , 4. , 3. ,  3.3 , 1. , 5 , .5])
         for i in xrange(len(yedges)-1):
             plt.plot(xticks, eff[:,i], label="[{:.2f}, {:.2f}]".format(yedges[i],yedges[i+1]))
-        plt.plot(xticks,numpy.tanh((xticks-3)/.5),label='tanh')
+            # dum=(pars[0]+(pars[1]-pars[0])*logyticks[i])*numpy.tanh((xticks-(pars[2]+(pars[3]-pars[2])*logyticks[i]))/(pars[4]+(pars[5]-pars[4])*logyticks[i]))
+
+            dum = numpy.zeros(len(xticks))
+
+            aterm = pars[0]*(1-logyticks[i])**pars[1]
+            bterm = pars[2]+(pars[3]-pars[2])*logyticks[i]
+            cterm = pars[4]+(pars[5]-pars[4])*(1-logyticks[i])**4
+
+            normterm = numpy.exp(-aterm)
+            ok = (xticks-bterm) >0
+            argterm = (xticks[ok]-bterm)/cterm
+            tanhterm = numpy.tanh(argterm)**pars[6]
+            dum[ok] = normterm *tanhterm
+            # dum=numpy.exp(-pars[0]*(1-logyticks[i])**pars[1])*numpy.tanh((xticks-(pars[2]+(pars[3]-pars[2])*logyticks[i]))/(pars[4]+(pars[5]-pars[4])*logyticks[i]))**pars[6]
+            # dum[xticks-pars[2]<0]=0
+            # print  logyticks[i], (dum**(numpy.exp(pars[6]*(1-logyticks[i])))).max()
+            # plt.plot(xticks, dum**(numpy.exp(pars[6]*(1-logyticks[i]))), linestyle=':')
+            plt.plot(xticks, dum, linestyle=':')
         plt.plot(xticks, effston, label='all')
         plt.xlabel('STON')
         plt.ylabel('eff')
@@ -216,10 +301,17 @@ def plotdata(ston, fracincrease, found):
         # plt.legend(loc=4)
         # pdf.savefig()
         # plt.close()
+
+fit()
+# wefwe
+# lookatfit()
+
+#wefwe
+
 input = open('data.pkl', 'rb')
 [ston, fracincrease, found]=pickle.load(input)
 input.close()
-use = numpy.logical_and(fracincrease > 0, fracincrease <20)
+use = numpy.logical_and(fracincrease > 0.01, fracincrease <16)
 ston = ston[use]
 fracincrease = fracincrease[use]
 found = found[use]
