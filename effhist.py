@@ -4,6 +4,65 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import pickle
 
+def effmodel(ston, frac, pars, minlnFI, maxlnFI):
+    logfrac = numpy.log(frac)
+    logfrac = (logfrac-minlnFI)/(maxlnFI-minlnFI)
+    if logfrac < 0:
+        logfrac = 0
+    elif logfrac>1:
+        logfrac=1
+    aterm = 1+(pars[0]-1)*(1-logfrac)**pars[1]
+    bterm = pars[2]+(pars[3]-pars[2])*(1-logfrac)**pars[1]
+    cterm = pars[4]+(pars[5]-pars[4])*(1-logfrac)**pars[1]
+
+    dum = numpy.zeros(len(ston))
+    ok = (ston-bterm) >0
+    argterm = (ston[ok]-bterm)/cterm
+    tanhterm = numpy.tanh(argterm)**pars[6]
+    dum[ok] = aterm *tanhterm
+    return dum
+
+def loadpars():
+    f = open('stan2.pkl','rb')
+    fit,minlogFI, maxlogFI = pickle.load(f)
+    pars = numpy.append(numpy.mean(fit['a1']), numpy.mean(fit['a2']))
+    pars = numpy.append(pars, numpy.mean(fit['b'],axis=0))
+    pars = numpy.append(pars,  numpy.mean(fit['c'],axis=0))
+    pars = numpy.append(pars, numpy.mean(fit['pop']))
+    return pars, fit, minlogFI, maxlogFI
+    # n=3
+    # pars = numpy.append(numpy.mean(fit['a'][n+0:n+100,:],axis=0), numpy.mean(fit['b'][n+0:n+100,:],axis=0))
+    # pars = numpy.append(pars,  numpy.mean(fit['c'][n+0:n+100,:],axis=0))
+    # pars = numpy.append(pars, numpy.mean(fit['pop'][n+0:n+100])) 
+
+def surfaceplot():
+    from matplotlib import colors, ticker, cm
+    from matplotlib.ticker import FormatStrFormatter
+
+    pars, fit, minlnFI, maxlnFI =loadpars()
+
+    frac = numpy.arange(0.2, 10, 0.1)
+    ston = numpy.arange(3,10, 0.1)
+
+    ans = numpy.zeros((len(frac),len(ston)))
+    for i in xrange(len(frac)):
+        ans[i,:] = effmodel(ston, frac[i], pars, minlnFI, maxlnFI)
+
+    totaleff=1-(1-ans)**3
+
+    X, Y = numpy.meshgrid(ston, frac)
+    fig1, ax1 = plt.subplots()
+    cs = ax1.pcolor(X, Y, totaleff,norm=colors.LogNorm(vmin=0.9, vmax=1))
+    ax1.set_xlabel('STON')
+    ax1.set_ylabel('Fraction Increase')
+    ax1.set_yscale('log')
+    ax1.yaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
+    ax1.set_ylim((0.3,10))
+    cbar = fig1.colorbar(cs, ax=ax1)
+    cbar.set_ticks(numpy.arange(0.9,1.01,.01),update_ticks=True)
+    cbar.set_ticklabels(numpy.arange(0.9,1.01,.01),update_ticks=True)
+    cbar.set_label('Discovery Efficiency')
+    plt.show()
 
 def modelplots():
     import scipy.special
@@ -12,8 +71,6 @@ def modelplots():
     plt.plot(x,numpy.tanh(1.5*x),label='tanh')
     plt.legend()
     plt.show()
-
-
 
 def fit():
     import pystan
@@ -34,6 +91,11 @@ def fit():
     ston = ston[use]
     fracincrease = fracincrease[use]
     found = found[use]
+
+    lnFI = numpy.log(fracincrease)
+    minlogFI = lnFI.min()
+    maxlogFI = lnFI.max()
+    lnFI = (lnFI-minlogFI)/(maxlogFI-minlogFI)
 
     # lnFI = numpy.log(fracincrease)
     # lnFImin = lnFI.min()
@@ -72,13 +134,14 @@ def fit():
     # pickle.dump([chain,lnFImin,lnFImax], output)
     # output.close()
 
-    data = {'D': len(ston), 'ston': ston, 'fracincrease': fracincrease, 'found': found.astype('int')}
+    data = {'D': len(ston), 'ston': ston, 'lnFI': lnFI, 'found': found.astype('int')}
     sm = pystan.StanModel(file='effmodel.stan')
     # indict = {'a': [0.996,.999999], 'b': [.1, 4], 'c': [2, 1.],'pop':5.}
-    indict = {'a1': 0.5659394 , 'a2': 3, 'b': [3., 3.3], 'c': [1, 5.],'pop':2.}
-    fit = sm.sampling(data=data, iter=400, chains=4, init=[indict, indict, indict, indict])
-    output = open('stan.pkl','wb')
-    pickle.dump(fit.extract(), output)
+    indict = {'a1': 0.6 , 'a2': 4.5, 'b': [3.3, 2.5], 'c': [1.2, 3.5],'pop':4.5}
+    fit = sm.sampling(data=data, iter=500, chains=4, init=[indict, indict, indict, indict])
+
+    output = open('stan2.pkl','wb')
+    pickle.dump([fit.extract(),minlogFI, maxlogFI], output)
     output.close()
 
 
@@ -86,13 +149,10 @@ def fit():
 def lookatfit():
     import corner
     import pickle
-    f = open('stan.pkl','rb')
-    fit = pickle.load(f)
-    pars = numpy.append(numpy.mean(fit['a1']), numpy.mean(fit['a2']))
-    pars = numpy.append(pars, numpy.mean(fit['b'],axis=0))
-    pars = numpy.append(pars,  numpy.mean(fit['c'],axis=0))
-    pars = numpy.append(pars, numpy.mean(fit['pop']))
+    import matplotlib.pyplot as plt
+    import numpy
 
+    pars, fit = loadpars()
 
     plt.plot(fit[0,:,:])
     samples = fit.reshape((-1, 7))
@@ -103,9 +163,6 @@ def lookatfit():
         figure = corner.corner(fit)
         pdf.savefig()
         plt.close()
-
-
-
 
 def savedata():
     import glob
@@ -199,7 +256,6 @@ def plotdata(ston, fracincrease, found):
         H, xedges, yedges = numpy.histogram2d(ston, fracincrease, bins=[xedges, yedges])
         xticks = (0.5*(xedges+numpy.roll(xedges,-1)))[:-1]
         yticks = (0.5*(yedges+numpy.roll(yedges,-1)))[:-1]
-        logyticks = numpy.log(yticks)
 
         # plt.hist2d(ston, numpy.log(fracincrease), bins=[xedges, numpy.log(yedges)])
         # plt.colorbar()
@@ -222,43 +278,15 @@ def plotdata(ston, fracincrease, found):
                     inxy = numpy.logical_and(inx, iny)
                     eff[i,j] = found[inxy].sum()/H[i,j]
 
+        pars, fit = loadpars()
 
-        f = open('stan.pkl','rb')
-        fit = pickle.load(f)
-        pars = numpy.append(numpy.mean(fit['a1']), numpy.mean(fit['a2']))
-        pars = numpy.append(pars, numpy.mean(fit['b'],axis=0))
-        pars = numpy.append(pars,  numpy.mean(fit['c'],axis=0))
-        pars = numpy.append(pars, numpy.mean(fit['pop']))
-
-        # n=3
-        # pars = numpy.append(numpy.mean(fit['a'][n+0:n+100,:],axis=0), numpy.mean(fit['b'][n+0:n+100,:],axis=0))
-        # pars = numpy.append(pars,  numpy.mean(fit['c'][n+0:n+100,:],axis=0))
-        # pars = numpy.append(pars, numpy.mean(fit['pop'][n+0:n+100]))
-
-        print pars
-        logyticks = (logyticks-lnFImin)/(lnFImax-lnFImin)
-        # pars=numpy.array([.55,5.,3.4,3.4,2,.8,2.5])
-        # pars = numpy.array([ 0.48659394 , 4.84466494 , 2.6719694 ,  2.96490356 , 1.77596779 , 0.90177606 , 4.83420871])
-        pars = numpy.array([ .3 , 4. , 3. ,  3.3 , 1. , 5 , .5])
+        # print pars
+        # pars = numpy.array([ .6 , 5 , 3.3 ,  3. , 1. , 5. , 2])
         for i in xrange(len(yedges)-1):
             plt.plot(xticks, eff[:,i], label="[{:.2f}, {:.2f}]".format(yedges[i],yedges[i+1]))
             # dum=(pars[0]+(pars[1]-pars[0])*logyticks[i])*numpy.tanh((xticks-(pars[2]+(pars[3]-pars[2])*logyticks[i]))/(pars[4]+(pars[5]-pars[4])*logyticks[i]))
 
-            dum = numpy.zeros(len(xticks))
-
-            aterm = pars[0]*(1-logyticks[i])**pars[1]
-            bterm = pars[2]+(pars[3]-pars[2])*logyticks[i]
-            cterm = pars[4]+(pars[5]-pars[4])*(1-logyticks[i])**4
-
-            normterm = numpy.exp(-aterm)
-            ok = (xticks-bterm) >0
-            argterm = (xticks[ok]-bterm)/cterm
-            tanhterm = numpy.tanh(argterm)**pars[6]
-            dum[ok] = normterm *tanhterm
-            # dum=numpy.exp(-pars[0]*(1-logyticks[i])**pars[1])*numpy.tanh((xticks-(pars[2]+(pars[3]-pars[2])*logyticks[i]))/(pars[4]+(pars[5]-pars[4])*logyticks[i]))**pars[6]
-            # dum[xticks-pars[2]<0]=0
-            # print  logyticks[i], (dum**(numpy.exp(pars[6]*(1-logyticks[i])))).max()
-            # plt.plot(xticks, dum**(numpy.exp(pars[6]*(1-logyticks[i]))), linestyle=':')
+            dum = effmodel(xticks, yticks[i], pars, lnFImin, lnFImax)
             plt.plot(xticks, dum, linestyle=':')
         plt.plot(xticks, effston, label='all')
         plt.xlabel('STON')
@@ -268,6 +296,7 @@ def plotdata(ston, fracincrease, found):
         plt.ylim([0.1,1.05])
         plt.legend(loc=4)
         plt.show()
+
         # pdf.savefig()
         # plt.close()
 
@@ -302,8 +331,9 @@ def plotdata(ston, fracincrease, found):
         # pdf.savefig()
         # plt.close()
 
-fit()
-# wefwe
+surfaceplot()
+# fit()
+wefwe
 # lookatfit()
 
 #wefwe
@@ -311,10 +341,11 @@ fit()
 input = open('data.pkl', 'rb')
 [ston, fracincrease, found]=pickle.load(input)
 input.close()
-use = numpy.logical_and(fracincrease > 0.01, fracincrease <16)
+use = numpy.logical_and(fracincrease > 0.01, fracincrease <10)
 ston = ston[use]
 fracincrease = fracincrease[use]
 found = found[use]
+
 plotdata(ston, fracincrease, found)
 
 
