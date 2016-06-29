@@ -25,7 +25,7 @@ transformed data {
 parameters {
   # vector<lower=0.2, upper=6>[2] a;
   real<lower=0.5, upper=0.8> a1;
-  real<lower=3, upper=6> a2;
+  real<lower=1.5, upper=6> a2;
   vector<lower=1, upper=4>[2] b;
   vector<lower=1, upper=5>[2] c;
   real <lower=3, upper =6> pop;
