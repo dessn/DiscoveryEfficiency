@@ -8,6 +8,8 @@ import pickle
 fracincrease_min = 0.1
 fracincrease_max = 10.
 stonmin=4.
+stonmax=10.5
+npar=7
 
 def effmodel(ston, frac, pars, minlnFI, maxlnFI):
     logfrac = numpy.log(frac)
@@ -24,7 +26,7 @@ def effmodel(ston, frac, pars, minlnFI, maxlnFI):
     dum = numpy.zeros(len(ston))
     ok = (ston-bterm) >0
     argterm = (ston[ok]-bterm)/cterm
-    tanhterm = numpy.tanh(argterm)**2 #pars[6]
+    tanhterm = numpy.tanh(argterm)**pars[6]
     dum[ok] = aterm *tanhterm
     return dum
 
@@ -40,7 +42,7 @@ def loadpars(emcee=True):
         f = open('emcee.pkl','rb')
         fit,minlogFI, maxlogFI = pickle.load(f)
         f.close()
-        fit = fit[:,500:,:].reshape((-1,7))
+        fit = fit[:,600:,:].reshape((-1,npar))
         pars = numpy.mean(fit,axis=0)
     print pars
     return pars, fit, minlogFI, maxlogFI
@@ -56,8 +58,8 @@ def surfaceplot():
 
     pars, fit, minlnFI, maxlnFI =loadpars()
 
-    frac = numpy.arange(fracincrease_min, fracincrease_max, 0.1)
-    ston = numpy.arange(2,10, 0.1)
+    frac = numpy.arange(fracincrease_min, fracincrease_max, 0.02)
+    ston = numpy.arange(4,10, 0.02)
 
     ans = numpy.zeros((len(frac),len(ston)))
     for i in xrange(len(frac)):
@@ -67,17 +69,24 @@ def surfaceplot():
 
     X, Y = numpy.meshgrid(ston, frac)
     fig1, ax1 = plt.subplots()
-    cs = ax1.pcolor(X, Y, totaleff,norm=colors.LogNorm(vmin=0.9, vmax=1))
+    # cs = ax1.imshow(X, Y, totaleff,norm=colors.LogNorm(vmin=0.9, vmax=1),interpolation='nearest')
+    cs = ax1.pcolor(X, Y, totaleff,norm=colors.LogNorm(vmin=0.9, vmax=1),rasterized=True)
     ax1.set_xlabel('STON')
     ax1.set_ylabel('Fraction Increase')
     ax1.set_yscale('log')
     ax1.yaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
     ax1.set_ylim((0.3,10))
+    ax1.set_xscale('log')
+    ax1.set_xlim((4,10))
+    ax1.xaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
+    ax1.set_title('Discovery Efficiency Given Three Opportunities')
     cbar = fig1.colorbar(cs, ax=ax1)
     cbar.set_ticks(numpy.arange(0.9,1.01,.01),update_ticks=True)
     cbar.set_ticklabels(numpy.arange(0.9,1.01,.01),update_ticks=True)
     cbar.set_label('Discovery Efficiency')
-    plt.show()
+    with PdfPages('efficiency_3.pdf') as pdf:
+        pdf.savefig()
+        plt.close()
 
 
 def readdataforfit():
@@ -89,6 +98,8 @@ def readdataforfit():
     # prune sample
     use = numpy.logical_and(fracincrease > fracincrease_min, fracincrease <fracincrease_max)
     use = numpy.logical_and(use, ston > stonmin)
+    use = numpy.logical_and(use, ston < stonmax)
+    # use = numpy.logical_and(use, numpy.logical_or(ston < 10, ston > 16))
     ston = ston[use]
     fracincrease = fracincrease[use]
     found = found[use]
@@ -136,13 +147,13 @@ def fit_emcee():
 
     import sys
     import emcee
-    npar=7
+
     nwalkers=npar*2
 
 
     ston, found, lnFI, minlogFI, maxlogFI = readdataforfit()
 
-    xedges = stonmin * (2**numpy.arange(0,1.75,.25)) #numpy.arange(2,20.5,1)
+    xedges = stonmin * (2**numpy.arange(0,2.5,.25)) #numpy.arange(2,20.5,1)
     yedges =  fracincrease_min*(2**numpy.arange(8)) #(4**numpy.arange(6))/64. #numpy.arange(0,210,50)
     fracincrease  = numpy.exp(lnFI*(maxlogFI-minlogFI) + minlogFI)
     H, _,_ = numpy.histogram2d(ston, fracincrease, bins=[xedges, yedges])
@@ -174,7 +185,7 @@ def fit_emcee():
     foundpm = (-1)**found
 
     def lnprob(p, oneminuslnFI, found, foundpm, invH):
-        if (p[0]<0 or p[0]>1 or p[1]<1 or  p[2]<=1 or p[3]<=1  or p[4]<=0 or p[5]<=0 or p[6]<1):
+        if (p[0]<0.98 or p[0]>1 or p[1]<1 or  p[2]<=1 or p[3]<=1  or p[4]<=0 or p[5]<=0 or p[6] < 1):
             return -numpy.inf
 
         pterm = oneminuslnFI**p[1];
@@ -193,12 +204,12 @@ def fit_emcee():
     p0 = []
         #         pars = numpy.array([ .987 , 1.5 , 4. ,  4. , .8 , 1.3 , 1])
 
-    avg = numpy.array([0.985,1.5,4.,4,.8,1.2,2])
+    avg = numpy.array([0.985,1.3,3.8,3.8,0.9,1.3, 1.3])
     for i in range(nwalkers):
         p0.append(avg+numpy.random.uniform(-.5,.5,size=npar)*numpy.array([0.005,.1,.1,.1,.1,.1,.2]))
 
     sampler = emcee.EnsembleSampler(nwalkers, npar, lnprob, args=(1-lnFI, found, foundpm, invH))
-    sampler.run_mcmc(p0, 1000, thin=1)
+    sampler.run_mcmc(p0, 50000, thin=50)
 
     output = open('emcee.pkl','wb')
     chain = numpy.array(sampler.chain)
@@ -324,14 +335,18 @@ def plotdata(ston, fracincrease, found):
         # pars[1]=pars[1]*1.2
         # print pars
         # pars = numpy.array([ .987 , 1.5 , 4. ,  4. , .8 , 1.3 , 1])
-
+        # pars[0]=0.985
+        # pars[2]=3.5
+        # pars[3]=3.5
+        # pars[4]=1.4
+        # pars[5]=0.8
 
         for i in xrange(len(yedges)-1):
             plt.plot(xticks, eff[:,i], label="Frac. Inc. [{:.2f}, {:.2f}]".format(yedges[i],yedges[i+1]))
             # dum=(pars[0]+(pars[1]-pars[0])*logyticks[i])*numpy.tanh((xticks-(pars[2]+(pars[3]-pars[2])*logyticks[i]))/(pars[4]+(pars[5]-pars[4])*logyticks[i]))
 
             dum = effmodel(xticks, yticks[i], pars, minlnFI, maxlnFI)
-            plt.plot(xticks, dum, linestyle=':')
+            plt.plot(xticks, dum, linestyle=':',linewidth=3)
         # plt.plot(xticks, effston, label='all')
         plt.xlabel('STON')
         plt.ylabel('eff')
@@ -375,23 +390,69 @@ def plotdata(ston, fracincrease, found):
         # pdf.savefig()
         # plt.close()
 
-# fit_emcee()
+fit_emcee()
 # surfaceplot()
 # fit()
 # wefwe
 # lookatfit()
 
-# wefwe
 
 
+from matplotlib import colors, ticker, cm
+from matplotlib.ticker import FormatStrFormatter
 input = open('data.pkl', 'rb')
 [ston, fracincrease, found]=pickle.load(input)
 input.close()
-use = numpy.logical_and(fracincrease > fracincrease_min, fracincrease < fracincrease_max)
+
+use = numpy.logical_and(fracincrease > 0.1, fracincrease < 10)
+use = numpy.logical_and(use, ston > 4)
 ston = ston[use]
 fracincrease = fracincrease[use]
 found = found[use]
-
 plotdata(ston, fracincrease, found)
+
+# xedges = stonmin * (2**numpy.arange(0,2,.05)) #numpy.arange(2,20.5,1)
+# yedges =  fracincrease_min*(2**numpy.arange(0,8,.1)) #(4**numpy.arange(6))/64. #numpy.arange(0,210,50)
+# fracincrease  = numpy.exp(lnFI*(maxlogFI-minlogFI) + minlogFI)
+
+
+
+# H, _,_ = numpy.histogram2d(ston, fracincrease, bins=[xedges, yedges])
+
+
+# xbin = numpy.digitize(ston,xedges)
+# ybin = numpy.digitize(fracincrease,yedges)
+
+# eff = numpy.array(H)
+# eff[:,:]=0.
+
+# for i in xrange(len(found)):
+#     eff[xbin[i]-1,ybin[i]-1] += found[i]
+
+# eff /= H
+
+# xticks = (0.5*(xedges+numpy.roll(xedges,-1)))[:-1]
+# yticks = (0.5*(yedges+numpy.roll(yedges,-1)))[:-1]
+
+# X, Y = numpy.meshgrid(yticks, xticks)
+
+# fig1, ax1 = plt.subplots()
+# # cs = ax1.imshow(X, Y, totaleff,norm=colors.LogNorm(vmin=0.9, vmax=1),interpolation='nearest')
+# cs = ax1.pcolor(X, Y, eff,norm=colors.LogNorm(vmin=0.9, vmax=1),rasterized=True)
+# ax1.set_xlabel('STON')
+# ax1.set_ylabel('Fraction Increase')
+# ax1.set_yscale('log')
+# ax1.yaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
+# ax1.set_ylim((0.3,10))
+# ax1.set_xscale('log')
+# ax1.set_xlim((4,10))
+# ax1.xaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
+# ax1.set_title('Discovery Efficiency Given Three Opportunities')
+# cbar = fig1.colorbar(cs, ax=ax1)
+# cbar.set_ticks(numpy.arange(0.9,1.01,.01),update_ticks=True)
+# cbar.set_ticklabels(numpy.arange(0.9,1.01,.01),update_ticks=True)
+# cbar.set_label('Discovery Efficiency')
+
+# plt.show()
 
 
